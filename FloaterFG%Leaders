@@ -1,0 +1,126 @@
+---
+title: "Floater Plot"
+author: "Caleb Ramsey"
+date: "2025-08-04"
+output: html_document
+---
+
+```{r setup}
+library(ggplot2)
+library(ggimage)
+library(dplyr)
+library(readxl)
+library(hoopR)
+library(httr)
+library(showtext)
+library(purrr)
+library(stringi)
+library(stringr)
+```
+
+```{r data}
+FloaterData = read_excel("2024-25NBAFloaterData.xlsx")
+str(players_raw$PlayerIndex)
+```
+
+```{r setup}
+FloaterData = FloaterData %>%
+  mutate(Player = stri_trans_general(Player, "Latin-ASCII"))
+
+# Load active NBA players
+players_raw = hoopR::nba_playerindex()
+players = players_raw$PlayerIndex %>%
+  filter(TO_YEAR == "2025") %>%
+  mutate(displayName = str_c(PLAYER_FIRST_NAME, " ", PLAYER_LAST_NAME)) %>%
+  select(personId = PERSON_ID, displayName, teamId = TEAM_ID)
+
+# Headshot validation function
+is_valid_url <- function(url) {
+  tryCatch({
+    res = HEAD(url)
+    status_code(res) == 200
+  }, error = function(e) FALSE)
+}
+
+FloaterData = FloaterData %>%
+  mutate(Player = stri_trans_general(Player, "Latin-ASCII") %>% str_trim())
+
+players = players_raw$PlayerIndex %>%
+  filter(TO_YEAR == "2025") %>%
+  mutate(displayName = str_c(PLAYER_FIRST_NAME, " ", PLAYER_LAST_NAME) %>% 
+           stri_trans_general("Latin-ASCII") %>% 
+           str_trim()) %>%
+  select(personId = PERSON_ID, displayName, teamId = TEAM_ID)
+
+# Join and attach headshots
+FloaterDataAndHeadshot = FloaterData %>%
+  left_join(players, by = c("Player" = "displayName")) %>%
+  filter(!is.na(personId)) %>%
+  mutate(
+    headshot = map_chr(personId, ~ hoopR::nba_playerheadshot(player_id = .x))
+  )
+FloaterDataAndHeadshot = FloaterDataAndHeadshot %>%
+  mutate(headshot = case_when(
+    Player == "Nikola Jokic" ~ "https://cdn.nba.com/headshots/nba/latest/1040x760/203999.png",
+    Player == "Nikola Vucevic" ~ "https://cdn.nba.com/headshots/nba/latest/1040x760/202696.png",
+    TRUE ~ headshot
+  ))
+
+```
+
+```{r font}
+font_add_google("Poppins", "Poppins")
+```
+
+```{r theme setup}
+custom_theme = theme_minimal(base_family = "Poppins") +
+  theme(plot.background = element_rect(fill = "#f6f4ef", color = NA),   
+    panel.background = element_rect(fill = "#f6f4ef", color = NA),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, color = "#1a1a1a"),  
+    axis.title = element_text(size = 12, face = "bold", color = "#1a1a1a", margin = margin(r = 25)),
+    axis.title.y = element_text(margin = margin(r = 12)),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    plot.caption = element_text(size = 4, color = "#6e6e6e"))
+```
+
+```{r PPP v Poss plot}
+league_avg_ppp = mean(FloaterDataAndHeadshot$PPP, na.rm = TRUE)
+ggplot(FloaterDataAndHeadshot, aes(x = `Poss`, y = `PPP`, image = headshot)) + geom_hline(yintercept = league_avg_ppp, color = "red2", linetype = "dashed", alpha = 0.75) + geom_image(size = 0.1) + annotate("text",
+           x = Inf,
+           y = league_avg_ppp,
+           label = paste0("League Avg: ", round(league_avg_ppp, 2)),
+           hjust = 1.4,
+           vjust = 1.4,
+           color = "red3",
+           size = 2.5) + scale_y_continuous(limits = c(NA, 1.35)) + 
+  labs(title = "Floater PPP Leaders: 2024-25",
+       x = "Possessions", y = "PPP", caption = "Data: Synergy Sports | Plot: Caleb Ramsey") + custom_theme
+```
+
+```{r save plot}
+ggsave("path/FloaterMin50AttPPPGraph.png", 
+  plot = last_plot(), 
+  width = 10,          
+  height = 7,          
+  dpi = 300)
+```
+
+```{r FG% v Attempts plot}
+league_avg_fg = mean(FloaterDataAndHeadshot$`2 FG%`, na.rm = TRUE)
+ggplot(FloaterDataAndHeadshot, aes(x = `FG Att`, y = `2 FG%`, image = headshot)) + geom_hline(yintercept = league_avg_fg, color = "red2", linetype = "dashed", alpha = 0.75) + annotate("text",
+           x = Inf,
+           y = league_avg_fg,
+           label = paste0("League Avg: ", round(league_avg_fg, 2)),
+           hjust = 1.4,
+           vjust = 1.4,
+           color = "red3",
+           size = 2.5) + geom_image(size = 0.1) + labs(title = "Floater FG% Leaders: 2024-25", x = "Attempts", y = "FG%", caption = "Data: Synergy Sports | Plot: Caleb Ramsey) + custom_theme
+```
+
+```{r save plot}
+ggsave("path/FloaterMin50AttFGPercentGraph.png", 
+  plot = last_plot(), 
+  width = 10,          
+  height = 7,          
+  dpi = 300)
+```
